@@ -1,8 +1,9 @@
+import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
 
-const PROTECTED_ROUTES = ["/dashboard", "/account"];
+const PROTECTED_ROUTES = ["/dashboard", "/account", "/lab"];
 const AUTH_ROUTES = ["/login", "/register", "/forgot-password", "/reset-password"];
-const SESSION_COOKIE = "rugby.session_token";
+const COOKIE_PREFIX = "rugby";
 
 function buildCsp(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
@@ -18,7 +19,7 @@ function buildCsp(nonce: string): string {
     `base-uri 'self'`,
     `form-action 'self'`,
     `object-src 'none'`,
-    `upgrade-insecure-requests`,
+    ...(isDev ? [] : ["upgrade-insecure-requests"]),
   ];
   return directives.join("; ");
 }
@@ -29,7 +30,7 @@ export function proxy(request: NextRequest) {
   const isProtectedRoute = PROTECTED_ROUTES.some((r) => pathname.startsWith(r));
   const isAuthRoute = AUTH_ROUTES.some((r) => pathname.startsWith(r));
 
-  const hasSession = request.cookies.has(SESSION_COOKIE);
+  const hasSession = !!getSessionCookie(request, { cookiePrefix: COOKIE_PREFIX });
 
   if (isProtectedRoute && !hasSession) {
     const loginUrl = new URL("/login", request.url);
