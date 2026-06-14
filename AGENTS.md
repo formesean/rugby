@@ -148,7 +148,7 @@ const { data: session, isPending } = authClient.useSession()
 
 ### Database
 
-Drizzle ORM with `pg` connection pool. The pool uses a global singleton pattern to survive Next.js hot reloads in dev, with conservative limits (`max` via `DATABASE_POOL_MAX`, default 5) and SSL enabled automatically for non-local hosts. On serverless platforms, point `DATABASE_URL` at a connection pooler (PgBouncer / Supabase pooler / Neon) — each function instance opens its own pool.
+Drizzle ORM with `pg` connection pool. The pool uses a global singleton pattern to survive Next.js hot reloads in dev, with conservative limits (`max` via `DATABASE_POOL_MAX`, default 5) and SSL enabled automatically for non-local hosts. On serverless platforms, point the runtime `DATABASE_URL` at a connection pooler (Neon pooler, Supabase Supavisor, or PgBouncer) — each function instance opens its own pool. See [Migrations (CD)](#migrations-cd) for the pooled-vs-direct distinction.
 
 - Import `db` from `@/db`
 - Import schema tables from `@/db/schema`
@@ -230,7 +230,39 @@ Sentry is wired across all runtimes but stays inert until `NEXT_PUBLIC_SENTRY_DS
 
 ### CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint + typecheck, tests with a coverage gate (`pnpm test:coverage`), and build on every push/PR to `main` or `develop`. Vercel deploys via the native GitHub App integration. `vercel.json` uses `ignoreCommand` to skip deployments for any branch other than `main` (production) and `develop` (preview).
+GitHub Actions (`.github/workflows/ci.yml`) runs lint + typecheck, tests with a coverage gate (`pnpm test:coverage`), and build on every push/PR to `main` or `develop`. CI validates code only — its build step uses **dummy** env vars and never touches a real database. Vercel deploys via the native GitHub App integration. `vercel.json` uses `ignoreCommand` to skip deployments for any branch other than `main` (production) and `develop` (preview).
+
+### Migrations (CD)
+
+Vercel builds but does **not** run migrations. A separate workflow (`.github/workflows/migrate.yml`) applies them, kept out of CI on purpose (CI must not mutate a real DB):
+
+- Triggers on push to `main`/`develop`, **only when `src/db/migrations/**` changes**.
+- Runs `pnpm db:migrate` against the matching environment's database (`main` → production, `develop` → develop), selected by `DATABASE_URL` from the secrets below.
+- Provides placeholder values for the non-DB required env vars, because `drizzle.config.ts` imports the full `@/env/server` schema; migrate itself only uses `DATABASE_URL`.
+
+**Provider-agnostic by design.** The template targets any managed Postgres; Neon and Supabase are the two recommended options. The migrate workflow only needs a **direct** (non-pooled) connection string per environment — it does not care which provider issued it. Pick one provider and use it for both environments.
+
+**Pooled vs direct connection strings.** Both providers expose two connection modes; use the right one for each job:
+
+| Job | Mode | Neon | Supabase |
+|-----|------|------|----------|
+| App runtime (Vercel `DATABASE_URL`) | **Pooled** | host contains `-pooler` | port `6543` (Supavisor transaction pooler), host `...pooler.supabase.com` |
+| Migrations / DDL (`pnpm db:migrate`, CD secrets) | **Direct** | host without `-pooler` | port `5432` (direct), or session-mode pooler if direct isn't reachable |
+
+Serverless app instances each open their own pool, so the runtime `DATABASE_URL` must point at the pooler. Migrations run as a single short-lived process and need the direct (session) connection — transaction poolers don't support the session-level statements DDL/migrations issue.
+
+> **Supabase note:** Supabase has no Neon-style Git branching out of the box. For two environments, create a **separate Supabase project** for production and develop, and take each project's direct + pooled strings from Settings → Database → Connection string. (Supabase's preview Branching feature is a paid, GitHub-integrated alternative if you want per-PR databases.)
+
+**Required GitHub Actions secrets** (Settings → Secrets and variables → Actions) — same names regardless of provider:
+- `PROD_DATABASE_URL_DIRECT` — production environment, **direct** connection string.
+- `DEV_DATABASE_URL_DIRECT` — develop environment, **direct** connection string.
+
+**Manual migrate fallback** (per environment, using the DIRECT string):
+```bash
+DATABASE_URL="<direct-connection-string>" pnpm db:migrate
+```
+
+> Migration ordering with Vercel: the CD migrate job and the Vercel deploy run in parallel. This is safe for **additive** migrations (new tables/columns — new code tolerates old schema until it uses them). For **destructive** migrations (drop/rename), apply the migration strictly before deploying the dependent code (e.g. ship the migration first, deploy the code after it lands).
 
 ## Environment Variables
 

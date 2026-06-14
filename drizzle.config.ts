@@ -1,8 +1,7 @@
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
-import { env } from "@/env/server";
 
-const databaseUrl = env.DATABASE_URL;
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error("DATABASE_URL environment variable is required");
