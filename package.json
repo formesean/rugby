@@ -97,6 +97,9 @@
     "typescript": "^5",
     "vitest": "^2.1.8"
   },
+  "lint-staged": {
+    "**/*.{ts,tsx,js,jsx,json,css}": "biome check --no-errors-on-unmatched --files-ignore-unknown=true"
+  },
   "config": {
     "commitizen": {
       "path": "./node_modules/cz-conventional-changelog"
