@@ -1,2 +1,2 @@
-export PATH="/opt/homebrew/bin:$PATH"
+#!/bin/sh
 pnpm commitlint --edit $1
